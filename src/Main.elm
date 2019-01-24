@@ -6,10 +6,14 @@ import Html exposing (..)
 import Html.Attributes as Attributes
 import Html.Events as Events
 import Http
+import Iso8601 as Iso
 import Json.Decode as Decode exposing (Decoder, int, list, string)
 import Json.Decode.Pipeline exposing (required)
 import Json.Encode as Encode exposing (Value, object)
+import Task
+import Time
 import Url
+import Utils
 
 
 
@@ -47,13 +51,15 @@ type alias Model =
     , error : Maybe String
     , showNewHabit : Bool
     , loading : Bool
+    , time : Time.Posix
+    , timezone : Time.Zone
     }
 
 
 type alias Entry =
     { id : Int
     , habit : Habit
-    , created : String
+    , created : Time.Posix
     }
 
 
@@ -72,8 +78,10 @@ init flags url key =
       , showNewHabit = False
       , loading = True
       , userId = flags.userId
+      , time = Time.millisToPosix 0
+      , timezone = Time.utc
       }
-    , pingApi flags.apiUrl
+    , Cmd.batch [ pingApi flags.apiUrl, Task.perform SetTimeZone Time.here ]
     )
 
 
@@ -128,6 +136,8 @@ type Msg
     | Login String
     | Logout
     | GotPing (Result Http.Error ())
+    | Tick Time.Posix
+    | SetTimeZone Time.Zone
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -183,7 +193,14 @@ update msg model =
         GotEntries result ->
             case result of
                 Ok entries ->
-                    ( { model | entries = entries }, Cmd.none )
+                    let
+                        today =
+                            Time.toDay model.timezone model.time
+
+                        todayEntries =
+                            List.filter (\entry -> Time.toDay model.timezone entry.created == today) entries
+                    in
+                    ( { model | entries = todayEntries }, Cmd.none )
 
                 Err _ ->
                     ( model, Cmd.none )
@@ -256,6 +273,12 @@ update msg model =
                         Nothing ->
                             Cmd.none
                     )
+
+        Tick time ->
+            ( { model | time = time }, Cmd.none )
+
+        SetTimeZone zone ->
+            ( { model | timezone = zone }, Cmd.none )
 
 
 
@@ -367,7 +390,7 @@ entryDecoder =
     Decode.succeed Entry
         |> required "id" int
         |> required "habit" habitDecoder
-        |> required "created" string
+        |> required "created" Iso.decoder
 
 
 entryEncoder : Habit -> Encode.Value
@@ -407,6 +430,7 @@ view model =
                                     [ text
                                         "Habits"
                                     ]
+                                , currentDay model.time model.timezone
                                 , h2 []
                                     [ text ((model.entries |> List.length |> String.fromInt) ++ " point(s) earned today")
                                     ]
@@ -424,6 +448,18 @@ view model =
             ]
         ]
     }
+
+
+currentDay : Time.Posix -> Time.Zone -> Html Msg
+currentDay time zone =
+    let
+        month =
+            Utils.monthToString (Time.toMonth zone time)
+
+        day =
+            String.fromInt (Time.toDay zone time)
+    in
+    div [] [ text (month ++ " " ++ day) ]
 
 
 renderError : Maybe String -> Html Msg
@@ -492,8 +528,8 @@ newHabitForm model =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions _ =
-    Sub.none
+subscriptions model =
+    Time.every 1000 Tick
 
 
 
