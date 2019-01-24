@@ -43,6 +43,7 @@ type alias Model =
     , newHabitName : String
     , newHabitCategory : String
     , user : Maybe User
+    , userId : Maybe String
     , error : Maybe String
     , showNewHabit : Bool
     , loading : Bool
@@ -70,13 +71,9 @@ init flags url key =
       , error = Nothing
       , showNewHabit = False
       , loading = True
+      , userId = flags.userId
       }
-    , case flags.userId of
-        Just id ->
-            getUserById flags.apiUrl id
-
-        Nothing ->
-            Cmd.none
+    , pingApi flags.apiUrl
     )
 
 
@@ -130,6 +127,7 @@ type Msg
     | LinkClicked Browser.UrlRequest
     | Login String
     | Logout
+    | GotPing (Result Http.Error ())
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -158,7 +156,7 @@ update msg model =
                         Just user ->
                             ( { model | user = Just user, habits = user.habits, loading = False }
                             , Cmd.batch
-                                [ getUserHabitEntriesToday user.id
+                                [ getUserHabitEntriesToday model.apiUrl user.id
                                 , writeToLocalStorage (Encode.object [ ( "userId", Encode.string (String.fromInt user.id) ) ])
                                 ]
                             )
@@ -174,7 +172,7 @@ update msg model =
                 Ok user ->
                     ( { model | user = Just user, habits = user.habits, loading = False }
                     , Cmd.batch
-                        [ getUserHabitEntriesToday user.id
+                        [ getUserHabitEntriesToday model.apiUrl user.id
                         , writeToLocalStorage (Encode.object [ ( "userId", Encode.string (String.fromInt user.id) ) ])
                         ]
                     )
@@ -203,10 +201,10 @@ update msg model =
             in
             ( model
             , if completed then
-                removeHabitEntry habit model.entries
+                removeHabitEntry model.apiUrl habit model.entries
 
               else
-                createHabitEntry habit
+                createHabitEntry model.apiUrl habit
             )
 
         GotHabitEntryCreated result ->
@@ -244,6 +242,21 @@ update msg model =
         Logout ->
             ( { model | user = Nothing }, writeToLocalStorage (Encode.object [ ( "userId", Encode.null ) ]) )
 
+        GotPing result ->
+            case result of
+                Err _ ->
+                    ( { model | loading = False, error = Just "Can not reach server" }, Cmd.none )
+
+                Ok _ ->
+                    ( { model | loading = False }
+                    , case model.userId of
+                        Just id ->
+                            getUserById model.apiUrl id
+
+                        Nothing ->
+                            Cmd.none
+                    )
+
 
 
 -- ========================================================================== --
@@ -267,25 +280,25 @@ getUserById apiUrl id =
         }
 
 
-getUserHabitEntriesToday : Int -> Cmd Msg
-getUserHabitEntriesToday userId =
+getUserHabitEntriesToday : String -> Int -> Cmd Msg
+getUserHabitEntriesToday apiUrl userId =
     Http.get
-        { url = "http://localhost:8383/entries/today?userId=" ++ String.fromInt userId
+        { url = apiUrl ++ "/entries/today?userId=" ++ String.fromInt userId
         , expect = Http.expectJson GotEntries entriesDecoder
         }
 
 
-createHabitEntry : Habit -> Cmd Msg
-createHabitEntry habit =
+createHabitEntry : String -> Habit -> Cmd Msg
+createHabitEntry apiUrl habit =
     Http.post
-        { url = "http://localhost:8383/entries"
+        { url = apiUrl ++ "/entries"
         , body = Http.jsonBody (entryEncoder habit)
         , expect = Http.expectJson GotHabitEntryCreated entryDecoder
         }
 
 
-removeHabitEntry : Habit -> List Entry -> Cmd Msg
-removeHabitEntry habit entries =
+removeHabitEntry : String -> Habit -> List Entry -> Cmd Msg
+removeHabitEntry apiUrl habit entries =
     let
         entry =
             entries
@@ -299,13 +312,21 @@ removeHabitEntry habit entries =
         Just habitEntry ->
             Http.request
                 { method = "DELETE"
-                , url = "http://localhost:8383/entries/" ++ String.fromInt habitEntry.id
+                , url = apiUrl ++ "/entries/" ++ String.fromInt habitEntry.id
                 , expect = Http.expectJson DeletedEntry entryDecoder
                 , headers = []
                 , body = Http.emptyBody
                 , timeout = Nothing
                 , tracker = Nothing
                 }
+
+
+pingApi : String -> Cmd Msg
+pingApi apiUrl =
+    Http.get
+        { url = apiUrl ++ "/ping"
+        , expect = Http.expectWhatever GotPing
+        }
 
 
 usersDecoder : Decoder (List User)
