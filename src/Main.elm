@@ -463,9 +463,25 @@ renderHabit entries habit =
 
 newHabitForm : Model -> Html Msg
 newHabitForm model =
-    form [ Events.onSubmit AddHabit ]
-        [ input [ Attributes.placeholder "Habit", Attributes.value model.newHabitName, Events.onInput HandleNewHabitChange ] []
-        , input [ Attributes.placeholder "Category", Attributes.value model.newHabitCategory, Events.onInput HandleNewHabitCategoryChange ] []
+    form [ Attributes.class "new-habit-form", Events.onSubmit AddHabit ]
+        [ input
+            [ Attributes.placeholder "Habit"
+            , Attributes.class "input"
+            , Attributes.value model.newHabitName
+            , Events.onInput HandleNewHabitChange
+            ]
+            []
+        , input
+            [ Attributes.placeholder "Category"
+            , Attributes.class "input"
+            , Attributes.value model.newHabitCategory
+            , Events.onInput HandleNewHabitCategoryChange
+            ]
+            []
+        , div [ Attributes.class "new-habit-buttons" ]
+            [ button [ Attributes.type_ "button", Attributes.class "cancel", Events.onClick ToggleShowNewHabit ] [ text "Cancel" ]
+            , button [ Attributes.type_ "submit" ] [ text "Create" ]
+            ]
         ]
 
 
