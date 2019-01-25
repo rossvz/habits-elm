@@ -81,7 +81,7 @@ init flags url key =
       , time = Time.millisToPosix 0
       , timezone = Time.utc
       }
-    , Cmd.batch [ pingApi flags.apiUrl, Task.perform SetTimeZone Time.here ]
+    , Cmd.batch [ Task.perform SetTimeZone Time.here, Task.perform Tick Time.now ]
     )
 
 
@@ -278,7 +278,9 @@ update msg model =
             ( { model | time = time }, Cmd.none )
 
         SetTimeZone zone ->
-            ( { model | timezone = zone }, Cmd.none )
+            ( { model | timezone = zone }
+            , pingApi model.apiUrl
+            )
 
 
 
@@ -528,8 +530,8 @@ newHabitForm model =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions model =
-    Time.every 1000 Tick
+subscriptions _ =
+    Sub.none
 
 
 
