@@ -60,6 +60,7 @@ type alias Entry =
     { id : Int
     , habit : Habit
     , created : Time.Posix
+    , unixCreated : Time.Posix
     }
 
 
@@ -166,7 +167,7 @@ update msg model =
                         Just user ->
                             ( { model | user = Just user, habits = user.habits, loading = False }
                             , Cmd.batch
-                                [ getUserHabitEntriesToday model.apiUrl user.id
+                                [ getUserHabitEntriesToday model.apiUrl user.id model.time model.timezone
                                 , writeToLocalStorage (Encode.object [ ( "userId", Encode.string (String.fromInt user.id) ) ])
                                 ]
                             )
@@ -182,7 +183,7 @@ update msg model =
                 Ok user ->
                     ( { model | user = Just user, habits = user.habits, loading = False }
                     , Cmd.batch
-                        [ getUserHabitEntriesToday model.apiUrl user.id
+                        [ getUserHabitEntriesToday model.apiUrl user.id model.time model.timezone
                         , writeToLocalStorage (Encode.object [ ( "userId", Encode.string (String.fromInt user.id) ) ])
                         ]
                     )
@@ -305,10 +306,24 @@ getUserById apiUrl id =
         }
 
 
-getUserHabitEntriesToday : String -> Int -> Cmd Msg
-getUserHabitEntriesToday apiUrl userId =
+getUserHabitEntriesToday : String -> Int -> Time.Posix -> Time.Zone -> Cmd Msg
+getUserHabitEntriesToday apiUrl userId time zone =
+    let
+        timeEnd =
+            Time.posixToMillis time
+
+        timeStart =
+            timeEnd - Utils.timeTilStartOfDay time zone
+    in
     Http.get
-        { url = apiUrl ++ "/entries/today?userId=" ++ String.fromInt userId
+        { url =
+            apiUrl
+                ++ "/entries/between?userId="
+                ++ String.fromInt userId
+                ++ "&start="
+                ++ String.fromInt timeStart
+                ++ "&end="
+                ++ String.fromInt timeEnd
         , expect = Http.expectJson GotEntries entriesDecoder
         }
 
@@ -354,6 +369,10 @@ pingApi apiUrl =
         }
 
 
+
+-- SERIALIZATION
+
+
 usersDecoder : Decoder (List User)
 usersDecoder =
     list userDecoder
@@ -387,12 +406,23 @@ entriesDecoder =
     list entryDecoder
 
 
+secondsToPosix : Int -> Time.Posix
+secondsToPosix seconds =
+    Time.millisToPosix (seconds * 1000)
+
+
+timeDecoder : Decoder Time.Posix
+timeDecoder =
+    Decode.map secondsToPosix int
+
+
 entryDecoder : Decoder Entry
 entryDecoder =
     Decode.succeed Entry
         |> required "id" int
         |> required "habit" habitDecoder
         |> required "created" Iso.decoder
+        |> required "unixCreated" timeDecoder
 
 
 entryEncoder : Habit -> Encode.Value
@@ -531,7 +561,7 @@ newHabitForm model =
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    Sub.none
+    Time.every 10000 Tick
 
 
 
