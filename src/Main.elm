@@ -3,7 +3,7 @@ port module Main exposing (Habit, Model, Msg(..), init, main, update, view)
 import Browser
 import Browser.Navigation as Nav
 import Html exposing (..)
-import Html.Attributes as Attributes
+import Html.Attributes as Attributes exposing (class)
 import Html.Events as Events
 import Http
 import Iso8601 as Iso
@@ -194,14 +194,7 @@ update msg model =
         GotEntries result ->
             case result of
                 Ok entries ->
-                    let
-                        today =
-                            Time.toDay model.timezone model.time
-
-                        todayEntries =
-                            List.filter (\entry -> Time.toDay model.timezone entry.created == today) entries
-                    in
-                    ( { model | entries = todayEntries }, Cmd.none )
+                    ( { model | entries = entries }, Cmd.none )
 
                 Err _ ->
                     ( model, Cmd.none )
@@ -222,7 +215,7 @@ update msg model =
                 removeHabitEntry model.apiUrl habit model.entries
 
               else
-                createHabitEntry model.apiUrl habit
+                createHabitEntry model.apiUrl habit model.time
             )
 
         GotHabitEntryCreated result ->
@@ -276,7 +269,14 @@ update msg model =
                     )
 
         Tick time ->
-            ( { model | time = time }, Cmd.none )
+            ( { model | time = time }
+            , case model.user of
+                Just user ->
+                    getUserHabitEntriesToday model.apiUrl user.id time model.timezone
+
+                Nothing ->
+                    Cmd.none
+            )
 
         SetTimeZone zone ->
             ( { model | timezone = zone }
@@ -309,11 +309,14 @@ getUserById apiUrl id =
 getUserHabitEntriesToday : String -> Int -> Time.Posix -> Time.Zone -> Cmd Msg
 getUserHabitEntriesToday apiUrl userId time zone =
     let
-        timeEnd =
+        timeMs =
             Time.posixToMillis time
 
+        timeEnd =
+            timeMs + Utils.timeTilEndOfDay time zone
+
         timeStart =
-            timeEnd - Utils.timeTilStartOfDay time zone
+            timeMs - Utils.timeTilStartOfDay time zone
     in
     Http.get
         { url =
@@ -328,11 +331,11 @@ getUserHabitEntriesToday apiUrl userId time zone =
         }
 
 
-createHabitEntry : String -> Habit -> Cmd Msg
-createHabitEntry apiUrl habit =
+createHabitEntry : String -> Habit -> Time.Posix -> Cmd Msg
+createHabitEntry apiUrl habit time =
     Http.post
         { url = apiUrl ++ "/entries"
-        , body = Http.jsonBody (entryEncoder habit)
+        , body = Http.jsonBody (entryEncoder habit time)
         , expect = Http.expectJson GotHabitEntryCreated entryDecoder
         }
 
@@ -425,9 +428,13 @@ entryDecoder =
         |> required "unixCreated" timeDecoder
 
 
-entryEncoder : Habit -> Encode.Value
-entryEncoder habit =
-    Encode.object [ ( "habit", Encode.int habit.id ) ]
+entryEncoder : Habit -> Time.Posix -> Encode.Value
+entryEncoder habit time =
+    let
+        timeSeconds =
+            Time.posixToMillis time // 1000
+    in
+    Encode.object [ ( "habit", Encode.int habit.id ), ( "unixCreated", Encode.int timeSeconds ) ]
 
 
 
@@ -440,25 +447,25 @@ view : Model -> Browser.Document Msg
 view model =
     { title = "Habits"
     , body =
-        [ div [ Attributes.class "container" ]
+        [ div [ class "container" ]
             [ renderError model.error
             , if model.loading then
                 div [] [ text "Loading..." ]
 
               else
-                div [ Attributes.class "app" ]
+                div [ class "app" ]
                     [ case model.user of
                         Nothing ->
                             form [ Events.onSubmit (Login model.email) ]
                                 [ p [] [ text "Enter your email address to log in:" ]
-                                , input [ Attributes.placeholder "Email address", Attributes.class "input", Events.onInput ChangeEmail, Attributes.value model.email ] []
-                                , div [ Attributes.class "separator" ] []
+                                , input [ Attributes.placeholder "Email address", class "input", Events.onInput ChangeEmail, Attributes.value model.email ] []
+                                , div [ class "separator" ] []
                                 , button [ Attributes.type_ "submit" ] [ text "Go" ]
                                 ]
 
                         Just _ ->
                             div []
-                                [ h1 [ Attributes.class "user" ]
+                                [ h1 [ class "user" ]
                                     [ text
                                         "Habits"
                                     ]
@@ -471,7 +478,7 @@ view model =
                                     newHabitForm model
 
                                   else
-                                    div [ Attributes.class "footer" ]
+                                    div [ class "footer" ]
                                         [ span [ Events.onClick Logout ] [ text "Logout" ]
                                         , button [ Events.onClick ToggleShowNewHabit ] [ text "+" ]
                                         ]
@@ -490,8 +497,22 @@ currentDay time zone =
 
         day =
             String.fromInt (Time.toDay zone time)
+
+        yesterday =
+            Time.posixToMillis time
+                - 86400000
+                |> Time.millisToPosix
+
+        tomorrow =
+            Time.posixToMillis time
+                + 86400000
+                |> Time.millisToPosix
     in
-    div [] [ text (month ++ " " ++ day) ]
+    div [ class "day-container" ]
+        [ button [ class "day-selector-button", Events.onClick (Tick yesterday) ] [ text "<" ]
+        , text (month ++ " " ++ day)
+        , button [ class "day-selector-button", Events.onClick (Tick tomorrow) ] [ text ">" ]
+        ]
 
 
 renderError : Maybe String -> Html Msg
@@ -501,18 +522,18 @@ renderError maybeError =
             span [] []
 
         Just error ->
-            div [ Attributes.class "error-container" ] [ text error ]
+            div [ class "error-container" ] [ text error ]
 
 
 renderHabits : List Habit -> List Entry -> Html Msg
 renderHabits habits entries =
-    div [ Attributes.class "habits-container" ] (habits |> List.map (renderHabit entries))
+    div [ class "habits-container" ] (habits |> List.map (renderHabit entries))
 
 
 renderHabit : List Entry -> Habit -> Html Msg
 renderHabit entries habit =
     div
-        [ Attributes.class
+        [ class
             ("habit"
                 ++ (if habitIsCompleted habit entries then
                         " completed"
@@ -531,23 +552,23 @@ renderHabit entries habit =
 
 newHabitForm : Model -> Html Msg
 newHabitForm model =
-    form [ Attributes.class "new-habit-form", Events.onSubmit AddHabit ]
+    form [ class "new-habit-form", Events.onSubmit AddHabit ]
         [ input
             [ Attributes.placeholder "Habit"
-            , Attributes.class "input"
+            , class "input"
             , Attributes.value model.newHabitName
             , Events.onInput HandleNewHabitChange
             ]
             []
         , input
             [ Attributes.placeholder "Category"
-            , Attributes.class "input"
+            , class "input"
             , Attributes.value model.newHabitCategory
             , Events.onInput HandleNewHabitCategoryChange
             ]
             []
-        , div [ Attributes.class "new-habit-buttons" ]
-            [ button [ Attributes.type_ "button", Attributes.class "cancel", Events.onClick ToggleShowNewHabit ] [ text "Cancel" ]
+        , div [ class "new-habit-buttons" ]
+            [ button [ Attributes.type_ "button", class "cancel", Events.onClick ToggleShowNewHabit ] [ text "Cancel" ]
             , button [ Attributes.type_ "submit" ] [ text "Create" ]
             ]
         ]
@@ -561,7 +582,7 @@ newHabitForm model =
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    Time.every 10000 Tick
+    Sub.none
 
 
 
