@@ -1,4 +1,4 @@
-module Utils exposing (monthToString)
+module Utils exposing (monthToString, timeTilEndOfDay, timeTilStartOfDay)
 
 import Time
 
@@ -41,3 +41,63 @@ monthToString month =
 
         Time.Dec ->
             "December"
+
+
+timeTilStartOfDay : Time.Posix -> Time.Zone -> Int
+timeTilStartOfDay time zone =
+    let
+        hour =
+            Time.toHour zone time
+
+        min =
+            Time.toMinute zone time
+
+        sec =
+            Time.toSecond zone time
+
+        ms =
+            Time.toMillis zone time
+
+        hourToMs =
+            60 * 60 * 1000
+
+        minToMs =
+            60 * 1000
+
+        secToMs =
+            1000
+    in
+    (hour * hourToMs)
+        + (min * minToMs)
+        + (sec * secToMs)
+        + ms
+
+
+timeTilEndOfDay : Time.Posix -> Time.Zone -> Int
+timeTilEndOfDay time zone =
+    let
+        hour =
+            24 - Time.toHour zone time
+
+        min =
+            59 - Time.toMinute zone time
+
+        sec =
+            59 - Time.toSecond zone time
+
+        ms =
+            1000 - Time.toMillis zone time
+
+        hourToMs =
+            60 * 60 * 1000
+
+        minToMs =
+            60 * 1000
+
+        secToMs =
+            1000
+    in
+    (hour * hourToMs)
+        + (min * minToMs)
+        + (sec * secToMs)
+        + ms
