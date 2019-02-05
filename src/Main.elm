@@ -143,6 +143,7 @@ type Msg
     | Tick Time.Posix
     | SetTimeZone Time.Zone
     | GotHabitCreated (Result Http.Error Habit)
+    | DismissError
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -308,6 +309,9 @@ update msg model =
             ( { model | timezone = zone }
             , pingApi model.apiUrl
             )
+
+        DismissError ->
+            ( { model | error = Nothing }, Cmd.none )
 
 
 
@@ -567,7 +571,14 @@ renderError maybeError =
             span [] []
 
         Just error ->
-            div [ class "error-container" ] [ text error ]
+            span [ class "error-container" ]
+                [ div [ class "error" ]
+                    [ span [] [ text error ]
+                    ]
+                , div [ Events.onClick DismissError, class "dismiss-error-container" ]
+                    [ span [] [ text "Dismiss" ]
+                    ]
+                ]
 
 
 renderHabits : List Habit -> List Entry -> Html Msg

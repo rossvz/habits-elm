@@ -67,20 +67,35 @@ button.active {
   background-color: #444444ad;
   width: 75vw;
   margin-bottom: 5vh;
-
 }
 
 .error-container {
   position: absolute;
   top: 0;
-  width: 40vw;
+  width: 45vw;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-direction: column;
+}
+
+.error {
+  width: 100%;
   background: #f64f59;
   font-size: 1.2em;
-  padding: 20px;
-  border-radius: 8px;
+  border-radius: 8px 8px 0 0;
+  text-align: center;
+  line-height: 3.2em;
+}
+
+.dismiss-error-container {
+  background: white;
+  border-radius: 0 0 8px 8px;
+  width: 100%;
+  font-size: 1em;
+  color: #f64f59;
+  text-align: center;
+  line-height: 2.2em;
 }
 
 .separator {
