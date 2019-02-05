@@ -173,7 +173,9 @@ update msg model =
                         habits =
                             List.append model.habits [ habit ]
                     in
-                    ( { model | habits = habits, error = Nothing, showNewHabit = False }, getUserHabitEntriesToday model.apiUrl u.id model.time model.timezone )
+                    ( { model | habits = habits, error = Nothing, showNewHabit = False }
+                    , getUserHabitEntriesToday model.apiUrl u.id model.time model.timezone
+                    )
 
         GotHabitCreated (Err _) ->
             ( { model | error = Just "Failed to create new habit" }, Cmd.none )
