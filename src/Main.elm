@@ -9,7 +9,7 @@ import Http
 import Iso8601 as Iso
 import Json.Decode as Decode exposing (Decoder, int, list, string)
 import Json.Decode.Pipeline exposing (required)
-import Json.Encode as Encode exposing (Value, object)
+import Json.Encode as Encode exposing (object)
 import Task
 import Time
 import Url
@@ -94,16 +94,19 @@ type alias Habit =
     }
 
 
+type alias NewHabit =
+    { name : String
+    , category : String
+    , weight : Int
+    }
+
+
 type alias User =
     { id : Int
     , name : String
     , email : String
     , habits : List Habit
     }
-
-
-type UserList
-    = UserList (List User)
 
 
 habitIsCompleted : Habit -> List Entry -> Bool
@@ -139,6 +142,7 @@ type Msg
     | GotPing (Result Http.Error ())
     | Tick Time.Posix
     | SetTimeZone Time.Zone
+    | GotHabitCreated (Result Http.Error Habit)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -150,9 +154,29 @@ update msg model =
         AddHabit ->
             let
                 newHabit =
-                    { name = model.newHabitName, category = "Habit", weight = 1, id = List.length model.habits + 1 }
+                    { name = model.newHabitName, category = model.newHabitCategory, weight = 1 }
             in
-            ( { model | habits = newHabit :: model.habits, newHabitName = "" }, Cmd.none )
+            case model.user of
+                Nothing ->
+                    ( model, Cmd.none )
+
+                Just u ->
+                    ( model, createHabit model.apiUrl newHabit u.id )
+
+        GotHabitCreated (Ok habit) ->
+            case model.user of
+                Nothing ->
+                    ( { model | error = Just "User not authenticated" }, Cmd.none )
+
+                Just u ->
+                    let
+                        habits =
+                            List.append model.habits [ habit ]
+                    in
+                    ( { model | habits = habits, error = Nothing, showNewHabit = False }, getUserHabitEntriesToday model.apiUrl u.id model.time model.timezone )
+
+        GotHabitCreated (Err _) ->
+            ( { model | error = Just "Failed to create new habit" }, Cmd.none )
 
         HandleNewHabitChange newHabitName ->
             ( { model | newHabitName = newHabitName }, Cmd.none )
@@ -364,6 +388,15 @@ removeHabitEntry apiUrl habit entries =
                 }
 
 
+createHabit : String -> NewHabit -> Int -> Cmd Msg
+createHabit apiUrl newHabit userId =
+    Http.post
+        { url = apiUrl ++ "/habits"
+        , body = Http.jsonBody (habitEncoder newHabit userId)
+        , expect = Http.expectJson GotHabitCreated habitDecoder
+        }
+
+
 pingApi : String -> Cmd Msg
 pingApi apiUrl =
     Http.get
@@ -435,6 +468,16 @@ entryEncoder habit time =
             Time.posixToMillis time // 1000
     in
     Encode.object [ ( "habit", Encode.int habit.id ), ( "unixCreated", Encode.int timeSeconds ) ]
+
+
+habitEncoder : NewHabit -> Int -> Encode.Value
+habitEncoder newHabit userId =
+    Encode.object
+        [ ( "name", Encode.string newHabit.name )
+        , ( "category", Encode.string newHabit.category )
+        , ( "weight", Encode.int newHabit.weight )
+        , ( "user", Encode.int userId )
+        ]
 
 
 
