@@ -2,6 +2,7 @@ port module Main exposing (Habit, Model, Msg(..), init, main, update, view)
 
 import Browser
 import Browser.Navigation as Nav
+import FeatherIcons as Icons
 import Html exposing (..)
 import Html.Attributes as Attributes exposing (class)
 import Html.Events as Events
@@ -53,6 +54,7 @@ type alias Model =
     , loading : Bool
     , time : Time.Posix
     , timezone : Time.Zone
+    , route : Route
     }
 
 
@@ -81,6 +83,7 @@ init flags url key =
       , userId = flags.userId
       , time = Time.millisToPosix 0
       , timezone = Time.utc
+      , route = HabitsRoute
       }
     , Cmd.batch [ Task.perform SetTimeZone Time.here, Task.perform Tick Time.now ]
     )
@@ -107,6 +110,11 @@ type alias User =
     , email : String
     , habits : List Habit
     }
+
+
+type Route
+    = HabitsRoute
+    | ReportRoute
 
 
 habitIsCompleted : Habit -> List Entry -> Bool
@@ -144,6 +152,7 @@ type Msg
     | SetTimeZone Time.Zone
     | GotHabitCreated (Result Http.Error Habit)
     | DismissError
+    | RouteChanged Route
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -312,6 +321,9 @@ update msg model =
 
         DismissError ->
             ( { model | error = Nothing }, Cmd.none )
+
+        RouteChanged route ->
+            ( { model | route = route }, Cmd.none )
 
 
 
@@ -498,44 +510,62 @@ view model =
     , body =
         [ div [ class "container" ]
             [ renderError model.error
+            , h1 [ class "title" ] [ text "Habits" ]
             , if model.loading then
                 div [] [ text "Loading..." ]
 
               else
                 div [ class "app" ]
-                    [ case model.user of
-                        Nothing ->
-                            form [ Events.onSubmit (Login model.email) ]
-                                [ p [] [ text "Enter your email address to log in:" ]
-                                , input [ Attributes.placeholder "Email address", class "input", Events.onInput ChangeEmail, Attributes.value model.email ] []
-                                , div [ class "separator" ] []
-                                , button [ Attributes.type_ "submit" ] [ text "Go" ]
-                                ]
+                    (case model.route of
+                        HabitsRoute ->
+                            renderHabitsPage model
 
-                        Just _ ->
-                            div []
-                                [ h1 [ class "user" ]
-                                    [ text
-                                        "Habits"
-                                    ]
-                                , currentDay model.time model.timezone
-                                , h2 []
-                                    [ text ((model.entries |> List.length |> String.fromInt) ++ " point(s) earned today")
-                                    ]
-                                , renderHabits model.habits model.entries
-                                , if model.showNewHabit then
-                                    newHabitForm model
-
-                                  else
-                                    div [ class "footer" ]
-                                        [ span [ Events.onClick Logout ] [ text "Logout" ]
-                                        , button [ Events.onClick ToggleShowNewHabit ] [ text "+" ]
-                                        ]
-                                ]
-                    ]
+                        ReportRoute ->
+                            renderReportRoute model
+                    )
             ]
         ]
     }
+
+
+renderHabitsPage : Model -> List (Html Msg)
+renderHabitsPage model =
+    [ case model.user of
+        Nothing ->
+            form [ Events.onSubmit (Login model.email) ]
+                [ p [] [ text "Enter your email address to log in:" ]
+                , input [ Attributes.placeholder "Email address", class "input", Events.onInput ChangeEmail, Attributes.value model.email ] []
+                , div [ class "separator" ] []
+                , button [ Attributes.type_ "submit" ] [ text "Go" ]
+                ]
+
+        Just _ ->
+            div []
+                [ currentDay model.time model.timezone
+                , h2 [ class "point-counter" ]
+                    [ text ((model.entries |> List.length |> String.fromInt) ++ " point(s) earned today")
+                    ]
+                , renderHabits model.habits model.entries
+                , if model.showNewHabit then
+                    newHabitForm model
+
+                  else
+                    div [ class "footer" ]
+                        [ Icons.logOut |> Icons.toHtml [ Events.onClick Logout ]
+                        , Icons.plusSquare |> Icons.toHtml [ Events.onClick ToggleShowNewHabit ]
+                        , Icons.pieChart |> Icons.toHtml [ Events.onClick (RouteChanged ReportRoute) ]
+                        ]
+                ]
+    ]
+
+
+renderReportRoute : Model -> List (Html Msg)
+renderReportRoute model =
+    [ div [] [ text "REPORT PAGE" ]
+    , div [ class "footer" ]
+        [ Icons.calendar |> Icons.toHtml [ Events.onClick (RouteChanged HabitsRoute) ]
+        ]
+    ]
 
 
 currentDay : Time.Posix -> Time.Zone -> Html Msg
@@ -558,9 +588,9 @@ currentDay time zone =
                 |> Time.millisToPosix
     in
     div [ class "day-container" ]
-        [ button [ class "day-selector-button", Events.onClick (Tick yesterday) ] [ text "<" ]
+        [ div [ class "day-selector-button", Events.onClick (Tick yesterday) ] [ Icons.chevronsLeft |> Icons.toHtml [] ]
         , text (month ++ " " ++ day)
-        , button [ class "day-selector-button", Events.onClick (Tick tomorrow) ] [ text ">" ]
+        , div [ class "day-selector-button", Events.onClick (Tick tomorrow) ] [ Icons.chevronsRight |> Icons.toHtml [] ]
         ]
 
 

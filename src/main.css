@@ -156,11 +156,15 @@ button.active {
 
 .footer {
   display: flex;
-  width: 100%;
   flex-direction: row;
   align-items: center;
-  justify-content: space-evenly;
-  margin-top: 5%;
+  justify-content: space-between;
+  position: absolute;
+  bottom: 0;
+  margin: auto;
+  left: 0;
+  right: 0;
+  padding: 10px 20px;
 }
 
 .cancel {
@@ -191,4 +195,12 @@ button.active {
 .day-selector-button:focus,
 .day-selector-button.active {
   background-color: transparent;
+}
+
+.title {
+  letter-spacing: 10px;
+  font-variant-caps: all-petite-caps;
+  position: absolute;
+  top:0;
+  text-align: center;
 }
