@@ -2,6 +2,8 @@ port module Main exposing (Habit, Model, Msg(..), init, main, update, view)
 
 import Browser
 import Browser.Navigation as Nav
+import Dict
+import FeatherIcons as Icons
 import Html exposing (..)
 import Html.Attributes as Attributes exposing (class)
 import Html.Events as Events
@@ -53,6 +55,7 @@ type alias Model =
     , loading : Bool
     , time : Time.Posix
     , timezone : Time.Zone
+    , route : Route
     }
 
 
@@ -81,6 +84,7 @@ init flags url key =
       , userId = flags.userId
       , time = Time.millisToPosix 0
       , timezone = Time.utc
+      , route = HabitsRoute
       }
     , Cmd.batch [ Task.perform SetTimeZone Time.here, Task.perform Tick Time.now ]
     )
@@ -107,6 +111,11 @@ type alias User =
     , email : String
     , habits : List Habit
     }
+
+
+type Route
+    = HabitsRoute
+    | ReportRoute
 
 
 habitIsCompleted : Habit -> List Entry -> Bool
@@ -144,6 +153,7 @@ type Msg
     | SetTimeZone Time.Zone
     | GotHabitCreated (Result Http.Error Habit)
     | DismissError
+    | RouteChanged Route
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -218,13 +228,11 @@ update msg model =
                 Err _ ->
                     ( { model | error = Just "Failed to fetch users", loading = False }, Cmd.none )
 
-        GotEntries result ->
-            case result of
-                Ok entries ->
-                    ( { model | entries = entries }, Cmd.none )
+        GotEntries (Ok entries) ->
+            ( { model | entries = entries }, Cmd.none )
 
-                Err _ ->
-                    ( model, Cmd.none )
+        GotEntries (Err _) ->
+            ( { model | entries = [] }, Cmd.none )
 
         NoOp ->
             ( model, Cmd.none )
@@ -313,6 +321,23 @@ update msg model =
         DismissError ->
             ( { model | error = Nothing }, Cmd.none )
 
+        RouteChanged route ->
+            let
+                cmd =
+                    case model.user of
+                        Just user ->
+                            case route of
+                                HabitsRoute ->
+                                    getUserHabitEntriesToday model.apiUrl user.id model.time model.timezone
+
+                                ReportRoute ->
+                                    getUserHabitEntriesThisWeek model.apiUrl user.id model.time model.timezone
+
+                        _ ->
+                            Cmd.none
+            in
+            ( { model | route = route }, cmd )
+
 
 
 -- ========================================================================== --
@@ -336,6 +361,21 @@ getUserById apiUrl id =
         }
 
 
+getUserHabitEntriesInterval : String -> Int -> Int -> Int -> Cmd Msg
+getUserHabitEntriesInterval apiUrl userId start end =
+    Http.get
+        { url =
+            apiUrl
+                ++ "/entries/between?userId="
+                ++ String.fromInt userId
+                ++ "&start="
+                ++ String.fromInt start
+                ++ "&end="
+                ++ String.fromInt end
+        , expect = Http.expectJson GotEntries entriesDecoder
+        }
+
+
 getUserHabitEntriesToday : String -> Int -> Time.Posix -> Time.Zone -> Cmd Msg
 getUserHabitEntriesToday apiUrl userId time zone =
     let
@@ -343,22 +383,27 @@ getUserHabitEntriesToday apiUrl userId time zone =
             Time.posixToMillis time
 
         timeEnd =
-            timeMs + Utils.timeTilEndOfDay time zone
+            (timeMs + Utils.timeTilEndOfDay time zone) // 1000
 
         timeStart =
-            timeMs - Utils.timeTilStartOfDay time zone
+            (timeMs - Utils.timeTilStartOfDay time zone) // 1000
     in
-    Http.get
-        { url =
-            apiUrl
-                ++ "/entries/between?userId="
-                ++ String.fromInt userId
-                ++ "&start="
-                ++ String.fromInt timeStart
-                ++ "&end="
-                ++ String.fromInt timeEnd
-        , expect = Http.expectJson GotEntries entriesDecoder
-        }
+    getUserHabitEntriesInterval apiUrl userId timeStart timeEnd
+
+
+getUserHabitEntriesThisWeek : String -> Int -> Time.Posix -> Time.Zone -> Cmd Msg
+getUserHabitEntriesThisWeek apiUrl userId time zone =
+    let
+        timeMs =
+            Time.posixToMillis time
+
+        timeEnd =
+            timeMs // 1000
+
+        timeStart =
+            (timeMs - Utils.timeTilStartOfWeek time zone) // 1000
+    in
+    getUserHabitEntriesInterval apiUrl userId timeStart timeEnd
 
 
 createHabitEntry : String -> Habit -> Time.Posix -> Cmd Msg
@@ -498,44 +543,91 @@ view model =
     , body =
         [ div [ class "container" ]
             [ renderError model.error
+            , h1 [ class "title" ] [ text "Habits" ]
             , if model.loading then
                 div [] [ text "Loading..." ]
 
               else
                 div [ class "app" ]
-                    [ case model.user of
-                        Nothing ->
-                            form [ Events.onSubmit (Login model.email) ]
-                                [ p [] [ text "Enter your email address to log in:" ]
-                                , input [ Attributes.placeholder "Email address", class "input", Events.onInput ChangeEmail, Attributes.value model.email ] []
-                                , div [ class "separator" ] []
-                                , button [ Attributes.type_ "submit" ] [ text "Go" ]
-                                ]
+                    (case model.route of
+                        HabitsRoute ->
+                            renderHabitsPage model
 
-                        Just _ ->
-                            div []
-                                [ h1 [ class "user" ]
-                                    [ text
-                                        "Habits"
-                                    ]
-                                , currentDay model.time model.timezone
-                                , h2 []
-                                    [ text ((model.entries |> List.length |> String.fromInt) ++ " point(s) earned today")
-                                    ]
-                                , renderHabits model.habits model.entries
-                                , if model.showNewHabit then
-                                    newHabitForm model
-
-                                  else
-                                    div [ class "footer" ]
-                                        [ span [ Events.onClick Logout ] [ text "Logout" ]
-                                        , button [ Events.onClick ToggleShowNewHabit ] [ text "+" ]
-                                        ]
-                                ]
-                    ]
+                        ReportRoute ->
+                            renderReportRoute model
+                    )
             ]
         ]
     }
+
+
+renderHabitsPage : Model -> List (Html Msg)
+renderHabitsPage model =
+    [ case model.user of
+        Nothing ->
+            form [ Events.onSubmit (Login model.email) ]
+                [ p [] [ text "Enter your email address to log in:" ]
+                , input [ Attributes.placeholder "Email address", class "input", Events.onInput ChangeEmail, Attributes.value model.email ] []
+                , div [ class "separator" ] []
+                , button [ Attributes.type_ "submit" ] [ text "Go" ]
+                ]
+
+        Just _ ->
+            div []
+                [ currentDay model.time model.timezone
+                , h2 [ class "point-counter" ]
+                    [ text ((model.entries |> List.length |> String.fromInt) ++ " point(s) earned today")
+                    ]
+                , renderHabits model.habits model.entries
+                , if model.showNewHabit then
+                    newHabitForm model
+
+                  else
+                    div [ class "footer" ]
+                        [ Icons.logOut |> Icons.toHtml [ Events.onClick Logout ]
+                        , Icons.plusSquare |> Icons.toHtml [ Events.onClick ToggleShowNewHabit ]
+                        , Icons.pieChart |> Icons.toHtml [ Events.onClick (RouteChanged ReportRoute) ]
+                        ]
+                ]
+    ]
+
+
+renderReportRoute : Model -> List (Html Msg)
+renderReportRoute model =
+    let
+        foldByName =
+            \entry acc ->
+                let
+                    newValue =
+                        case Dict.get entry.habit.name acc of
+                            Nothing ->
+                                1
+
+                            Just v ->
+                                v + 1
+                in
+                Dict.insert entry.habit.name newValue acc
+
+        entriesCountByName =
+            List.foldl foldByName Dict.empty model.entries
+    in
+    [ div []
+        [ h2 [] [ text ((model.entries |> List.length |> String.fromInt) ++ " points this week") ]
+        , div []
+            (Dict.toList entriesCountByName
+                |> List.map
+                    (\( key, val ) ->
+                        div [ class "report-row" ]
+                            [ span [] [ text key ]
+                            , span [] [ text (String.fromInt val) ]
+                            ]
+                    )
+            )
+        ]
+    , div [ class "footer" ]
+        [ Icons.calendar |> Icons.toHtml [ Events.onClick (RouteChanged HabitsRoute) ]
+        ]
+    ]
 
 
 currentDay : Time.Posix -> Time.Zone -> Html Msg
@@ -558,9 +650,9 @@ currentDay time zone =
                 |> Time.millisToPosix
     in
     div [ class "day-container" ]
-        [ button [ class "day-selector-button", Events.onClick (Tick yesterday) ] [ text "<" ]
+        [ div [ class "day-selector-button", Events.onClick (Tick yesterday) ] [ Icons.chevronsLeft |> Icons.toHtml [] ]
         , text (month ++ " " ++ day)
-        , button [ class "day-selector-button", Events.onClick (Tick tomorrow) ] [ text ">" ]
+        , div [ class "day-selector-button", Events.onClick (Tick tomorrow) ] [ Icons.chevronsRight |> Icons.toHtml [] ]
         ]
 
 

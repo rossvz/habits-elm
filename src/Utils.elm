@@ -1,4 +1,4 @@
-module Utils exposing (monthToString, timeTilEndOfDay, timeTilStartOfDay)
+module Utils exposing (monthToString, timeTilEndOfDay, timeTilStartOfDay, timeTilStartOfWeek)
 
 import Time
 
@@ -101,3 +101,35 @@ timeTilEndOfDay time zone =
         + (min * minToMs)
         + (sec * secToMs)
         + ms
+
+
+timeTilStartOfWeek : Time.Posix -> Time.Zone -> Int
+timeTilStartOfWeek time zone =
+    let
+        dayStart =
+            timeTilStartOfDay time zone
+
+        msInDay days =
+            days * (24 * 60 * 60 * 1000)
+    in
+    case Time.toWeekday zone time of
+        Time.Mon ->
+            dayStart
+
+        Time.Tue ->
+            dayStart + msInDay 1
+
+        Time.Wed ->
+            dayStart + msInDay 2
+
+        Time.Thu ->
+            dayStart + msInDay 3
+
+        Time.Fri ->
+            dayStart + msInDay 4
+
+        Time.Sat ->
+            dayStart + msInDay 5
+
+        Time.Sun ->
+            dayStart + msInDay 6
