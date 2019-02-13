@@ -2,6 +2,7 @@ port module Main exposing (Habit, Model, Msg(..), init, main, update, view)
 
 import Browser
 import Browser.Navigation as Nav
+import Dict
 import FeatherIcons as Icons
 import Html exposing (..)
 import Html.Attributes as Attributes exposing (class)
@@ -227,13 +228,11 @@ update msg model =
                 Err _ ->
                     ( { model | error = Just "Failed to fetch users", loading = False }, Cmd.none )
 
-        GotEntries result ->
-            case result of
-                Ok entries ->
-                    ( { model | entries = entries }, Cmd.none )
+        GotEntries (Ok entries) ->
+            ( { model | entries = entries }, Cmd.none )
 
-                Err _ ->
-                    ( model, Cmd.none )
+        GotEntries (Err _) ->
+            ( { model | entries = [] }, Cmd.none )
 
         NoOp ->
             ( model, Cmd.none )
@@ -323,7 +322,21 @@ update msg model =
             ( { model | error = Nothing }, Cmd.none )
 
         RouteChanged route ->
-            ( { model | route = route }, Cmd.none )
+            let
+                cmd =
+                    case model.user of
+                        Just user ->
+                            case route of
+                                HabitsRoute ->
+                                    getUserHabitEntriesToday model.apiUrl user.id model.time model.timezone
+
+                                ReportRoute ->
+                                    getUserHabitEntriesThisWeek model.apiUrl user.id model.time model.timezone
+
+                        _ ->
+                            Cmd.none
+            in
+            ( { model | route = route }, cmd )
 
 
 
@@ -348,6 +361,21 @@ getUserById apiUrl id =
         }
 
 
+getUserHabitEntriesInterval : String -> Int -> Int -> Int -> Cmd Msg
+getUserHabitEntriesInterval apiUrl userId start end =
+    Http.get
+        { url =
+            apiUrl
+                ++ "/entries/between?userId="
+                ++ String.fromInt userId
+                ++ "&start="
+                ++ String.fromInt start
+                ++ "&end="
+                ++ String.fromInt end
+        , expect = Http.expectJson GotEntries entriesDecoder
+        }
+
+
 getUserHabitEntriesToday : String -> Int -> Time.Posix -> Time.Zone -> Cmd Msg
 getUserHabitEntriesToday apiUrl userId time zone =
     let
@@ -355,22 +383,27 @@ getUserHabitEntriesToday apiUrl userId time zone =
             Time.posixToMillis time
 
         timeEnd =
-            timeMs + Utils.timeTilEndOfDay time zone
+            (timeMs + Utils.timeTilEndOfDay time zone) // 1000
 
         timeStart =
-            timeMs - Utils.timeTilStartOfDay time zone
+            (timeMs - Utils.timeTilStartOfDay time zone) // 1000
     in
-    Http.get
-        { url =
-            apiUrl
-                ++ "/entries/between?userId="
-                ++ String.fromInt userId
-                ++ "&start="
-                ++ String.fromInt timeStart
-                ++ "&end="
-                ++ String.fromInt timeEnd
-        , expect = Http.expectJson GotEntries entriesDecoder
-        }
+    getUserHabitEntriesInterval apiUrl userId timeStart timeEnd
+
+
+getUserHabitEntriesThisWeek : String -> Int -> Time.Posix -> Time.Zone -> Cmd Msg
+getUserHabitEntriesThisWeek apiUrl userId time zone =
+    let
+        timeMs =
+            Time.posixToMillis time
+
+        timeEnd =
+            timeMs // 1000
+
+        timeStart =
+            (timeMs - Utils.timeTilStartOfWeek time zone) // 1000
+    in
+    getUserHabitEntriesInterval apiUrl userId timeStart timeEnd
 
 
 createHabitEntry : String -> Habit -> Time.Posix -> Cmd Msg
@@ -561,7 +594,36 @@ renderHabitsPage model =
 
 renderReportRoute : Model -> List (Html Msg)
 renderReportRoute model =
-    [ div [] [ text "REPORT PAGE" ]
+    let
+        foldByName =
+            \entry acc ->
+                let
+                    newValue =
+                        case Dict.get entry.habit.name acc of
+                            Nothing ->
+                                1
+
+                            Just v ->
+                                v + 1
+                in
+                Dict.insert entry.habit.name newValue acc
+
+        entriesCountByName =
+            List.foldl foldByName Dict.empty model.entries
+    in
+    [ div []
+        [ h2 [] [ text ((model.entries |> List.length |> String.fromInt) ++ " points this week") ]
+        , div []
+            (Dict.toList entriesCountByName
+                |> List.map
+                    (\( key, val ) ->
+                        div [ class "report-row" ]
+                            [ span [] [ text key ]
+                            , span [] [ text (String.fromInt val) ]
+                            ]
+                    )
+            )
+        ]
     , div [ class "footer" ]
         [ Icons.calendar |> Icons.toHtml [ Events.onClick (RouteChanged HabitsRoute) ]
         ]

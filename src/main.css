@@ -165,6 +165,7 @@ button.active {
   left: 0;
   right: 0;
   padding: 10px 20px;
+  background: #444444ad;
 }
 
 .cancel {
@@ -203,4 +204,10 @@ button.active {
   position: absolute;
   top:0;
   text-align: center;
+}
+
+.report-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 1.3em;
 }
