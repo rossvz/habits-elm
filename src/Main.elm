@@ -14,6 +14,7 @@ import Json.Decode.Pipeline exposing (required)
 import Json.Encode as Encode exposing (object)
 import Task
 import Time
+import Time.Extra
 import Url
 import Utils
 
@@ -361,17 +362,24 @@ getUserById apiUrl id =
         }
 
 
-getUserHabitEntriesInterval : String -> Int -> Int -> Int -> Cmd Msg
+getUserHabitEntriesInterval : String -> Int -> Time.Posix -> Time.Posix -> Cmd Msg
 getUserHabitEntriesInterval apiUrl userId start end =
+    let
+        startMs =
+            Time.posixToMillis start // 1000
+
+        endMs =
+            Time.posixToMillis end // 1000
+    in
     Http.get
         { url =
             apiUrl
                 ++ "/entries/between?userId="
                 ++ String.fromInt userId
                 ++ "&start="
-                ++ String.fromInt start
+                ++ String.fromInt startMs
                 ++ "&end="
-                ++ String.fromInt end
+                ++ String.fromInt endMs
         , expect = Http.expectJson GotEntries entriesDecoder
         }
 
@@ -379,14 +387,11 @@ getUserHabitEntriesInterval apiUrl userId start end =
 getUserHabitEntriesToday : String -> Int -> Time.Posix -> Time.Zone -> Cmd Msg
 getUserHabitEntriesToday apiUrl userId time zone =
     let
-        timeMs =
-            Time.posixToMillis time
-
         timeEnd =
-            (timeMs + Utils.timeTilEndOfDay time zone) // 1000
+            Time.Extra.ceiling Time.Extra.Day zone time
 
         timeStart =
-            (timeMs - Utils.timeTilStartOfDay time zone) // 1000
+            Time.Extra.floor Time.Extra.Day zone time
     in
     getUserHabitEntriesInterval apiUrl userId timeStart timeEnd
 
@@ -394,14 +399,11 @@ getUserHabitEntriesToday apiUrl userId time zone =
 getUserHabitEntriesThisWeek : String -> Int -> Time.Posix -> Time.Zone -> Cmd Msg
 getUserHabitEntriesThisWeek apiUrl userId time zone =
     let
-        timeMs =
-            Time.posixToMillis time
-
         timeEnd =
-            timeMs // 1000
+            Time.Extra.ceiling Time.Extra.Day zone time
 
         timeStart =
-            (timeMs - Utils.timeTilStartOfWeek time zone) // 1000
+            Time.Extra.floor Time.Extra.Week zone time
     in
     getUserHabitEntriesInterval apiUrl userId timeStart timeEnd
 
@@ -543,7 +545,6 @@ view model =
     , body =
         [ div [ class "container" ]
             [ renderError model.error
-            , h1 [ class "title" ] [ text "Habits" ]
             , if model.loading then
                 div [] [ text "Loading..." ]
 
