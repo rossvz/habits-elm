@@ -47,6 +47,8 @@ type alias Model =
     , habits : List Habit
     , entries : List Entry
     , email : String
+    , loginPassword : String
+    , registerName : String
     , newHabitName : String
     , newHabitCategory : String
     , user : Maybe User
@@ -76,6 +78,8 @@ init flags url key =
       , habits = []
       , entries = []
       , email = ""
+      , loginPassword = ""
+      , registerName = ""
       , newHabitName = ""
       , newHabitCategory = ""
       , user = Nothing
@@ -117,6 +121,7 @@ type alias User =
 type Route
     = HabitsRoute
     | ReportRoute
+    | RegisterRoute
 
 
 habitIsCompleted : Habit -> List Entry -> Bool
@@ -140,6 +145,8 @@ type Msg
     | GotUser (Result Http.Error User)
     | GotEntries (Result Http.Error (List Entry))
     | ChangeEmail String
+    | ChangePassword String
+    | ChangeRegisterName String
     | OnError String
     | ToggleHabit Habit
     | GotHabitEntryCreated (Result Http.Error Entry)
@@ -147,7 +154,8 @@ type Msg
     | ToggleShowNewHabit
     | UrlChanged Url.Url
     | LinkClicked Browser.UrlRequest
-    | Login String
+    | Login String String
+    | Register String String String
     | Logout
     | GotPing (Result Http.Error ())
     | Tick Time.Posix
@@ -155,6 +163,9 @@ type Msg
     | GotHabitCreated (Result Http.Error Habit)
     | DismissError
     | RouteChanged Route
+    | CheckTokenExp Msg
+    | DoStuff
+    | GotTokenResponse Msg (Result Http.Error String)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -162,6 +173,12 @@ update msg model =
     case msg of
         ChangeEmail email ->
             ( { model | email = email }, Cmd.none )
+
+        ChangePassword password ->
+            ( { model | loginPassword = password }, Cmd.none )
+
+        ChangeRegisterName name ->
+            ( { model | registerName = name }, Cmd.none )
 
         AddHabit ->
             let
@@ -185,7 +202,13 @@ update msg model =
                         habits =
                             List.append model.habits [ habit ]
                     in
-                    ( { model | habits = habits, error = Nothing, showNewHabit = False }
+                    ( { model
+                        | habits = habits
+                        , error = Nothing
+                        , showNewHabit = False
+                        , newHabitName = ""
+                        , newHabitCategory = ""
+                      }
                     , getUserHabitEntriesToday model.apiUrl u.id model.time model.timezone
                     )
 
@@ -219,7 +242,14 @@ update msg model =
         GotUser result ->
             case result of
                 Ok user ->
-                    ( { model | user = Just user, habits = user.habits, loading = False }
+                    ( { model
+                        | user = Just user
+                        , email = ""
+                        , loginPassword = ""
+                        , habits = user.habits
+                        , loading = False
+                        , route = HabitsRoute
+                      }
                     , Cmd.batch
                         [ getUserHabitEntriesToday model.apiUrl user.id model.time model.timezone
                         , writeToLocalStorage (Encode.object [ ( "userId", Encode.string (String.fromInt user.id) ) ])
@@ -227,7 +257,7 @@ update msg model =
                     )
 
                 Err _ ->
-                    ( { model | error = Just "Failed to fetch users", loading = False }, Cmd.none )
+                    ( { model | loading = False, route = RegisterRoute }, Cmd.none )
 
         GotEntries (Ok entries) ->
             ( { model | entries = entries }, Cmd.none )
@@ -283,8 +313,11 @@ update msg model =
         UrlChanged _ ->
             ( model, Cmd.none )
 
-        Login email ->
-            ( model, getUserByEmail model.apiUrl email )
+        Login email password ->
+            ( model, login model.apiUrl email password )
+
+        Register name email password ->
+            ( model, register model.apiUrl name email password )
 
         Logout ->
             ( { model | user = Nothing }, writeToLocalStorage (Encode.object [ ( "userId", Encode.null ) ]) )
@@ -295,14 +328,12 @@ update msg model =
                     ( { model | loading = False, error = Just "Can not reach server" }, Cmd.none )
 
                 Ok _ ->
-                    ( { model | loading = False }
-                    , case model.userId of
+                    case model.userId of
                         Just id ->
-                            getUserById model.apiUrl id
+                            ( model, getUserById model.apiUrl id )
 
                         Nothing ->
-                            Cmd.none
-                    )
+                            ( { model | loading = False }, Cmd.none )
 
         Tick time ->
             ( { model | time = time }
@@ -334,10 +365,49 @@ update msg model =
                                 ReportRoute ->
                                     getUserHabitEntriesThisWeek model.apiUrl user.id model.time model.timezone
 
+                                _ ->
+                                    Cmd.none
+
                         _ ->
                             Cmd.none
             in
             ( { model | route = route }, cmd )
+
+        CheckTokenExp message ->
+            let
+                token_exp =
+                    1551802125000
+
+                now_ms =
+                    Time.posixToMillis model.time
+            in
+            ( model
+            , if now_ms > token_exp then
+                refreshToken (model.apiUrl ++ "/ping") message
+
+              else
+                Cmd.none
+            )
+
+        GotTokenResponse m (Ok _) ->
+            model |> update m
+
+        GotTokenResponse _ (Err err) ->
+            let
+                _ =
+                    Debug.log "error" err
+            in
+            ( model, Cmd.none )
+
+        DoStuff ->
+            ( model
+            , case model.user of
+                Just user ->
+                    getUserHabitEntriesToday model.apiUrl user.id model.time model.timezone
+
+                Nothing ->
+                    Cmd.none
+            )
 
 
 
@@ -346,11 +416,29 @@ update msg model =
 -- ========================================================================== --
 
 
-getUserByEmail : String -> String -> Cmd Msg
-getUserByEmail apiUrl email =
+refreshToken : String -> Msg -> Cmd Msg
+refreshToken url msg =
     Http.get
-        { url = apiUrl ++ "/users?email=" ++ email
-        , expect = Http.expectJson GotUsers usersDecoder
+        { url = url
+        , expect = Http.expectString (GotTokenResponse msg)
+        }
+
+
+login : String -> String -> String -> Cmd Msg
+login apiUrl email password =
+    Http.post
+        { url = apiUrl ++ "/login"
+        , body = Http.jsonBody (loginEncoder email password)
+        , expect = Http.expectJson GotUser userDecoder
+        }
+
+
+register : String -> String -> String -> String -> Cmd Msg
+register apiUrl name email password =
+    Http.post
+        { url = apiUrl ++ "/register"
+        , body = Http.jsonBody (registerEncoder name email password)
+        , expect = Http.expectJson GotUser userDecoder
         }
 
 
@@ -462,11 +550,6 @@ pingApi apiUrl =
 -- SERIALIZATION
 
 
-usersDecoder : Decoder (List User)
-usersDecoder =
-    list userDecoder
-
-
 habitsDecoder : Decoder (List Habit)
 habitsDecoder =
     list habitDecoder
@@ -523,6 +606,23 @@ entryEncoder habit time =
     Encode.object [ ( "habit", Encode.int habit.id ), ( "unixCreated", Encode.int timeSeconds ) ]
 
 
+loginEncoder : String -> String -> Encode.Value
+loginEncoder email password =
+    Encode.object
+        [ ( "email", Encode.string email )
+        , ( "password", Encode.string password )
+        ]
+
+
+registerEncoder : String -> String -> String -> Encode.Value
+registerEncoder name email password =
+    Encode.object
+        [ ( "name", Encode.string name )
+        , ( "email", Encode.string email )
+        , ( "password", Encode.string password )
+        ]
+
+
 habitEncoder : NewHabit -> Int -> Encode.Value
 habitEncoder newHabit userId =
     Encode.object
@@ -556,6 +656,9 @@ view model =
 
                         ReportRoute ->
                             renderReportRoute model
+
+                        RegisterRoute ->
+                            renderRegisterRoute model
                     )
             ]
         ]
@@ -566,9 +669,10 @@ renderHabitsPage : Model -> List (Html Msg)
 renderHabitsPage model =
     [ case model.user of
         Nothing ->
-            form [ Events.onSubmit (Login model.email) ]
+            form [ Events.onSubmit (Login model.email model.loginPassword) ]
                 [ p [] [ text "Enter your email address to log in:" ]
                 , input [ Attributes.placeholder "Email address", class "input", Events.onInput ChangeEmail, Attributes.value model.email ] []
+                , input [ Attributes.placeholder "Password", Attributes.type_ "password", class "input", Events.onInput ChangePassword, Attributes.value model.loginPassword ] []
                 , div [ class "separator" ] []
                 , button [ Attributes.type_ "submit" ] [ text "Go" ]
                 ]
@@ -585,9 +689,18 @@ renderHabitsPage model =
 
                   else
                     div [ class "footer" ]
-                        [ Icons.logOut |> Icons.toHtml [ Events.onClick Logout ]
-                        , Icons.plusSquare |> Icons.toHtml [ Events.onClick ToggleShowNewHabit ]
-                        , Icons.pieChart |> Icons.toHtml [ Events.onClick (RouteChanged ReportRoute) ]
+                        [ div [ Attributes.class "labelled-icon" ]
+                            [ Icons.logOut |> Icons.toHtml [ Events.onClick Logout ]
+                            , text "Logout"
+                            ]
+                        , div [ Attributes.class "labelled-icon" ]
+                            [ Icons.plusSquare |> Icons.toHtml [ Events.onClick ToggleShowNewHabit ]
+                            , text "New Habit"
+                            ]
+                        , div [ Attributes.class "labelled-icon" ]
+                            [ Icons.pieChart |> Icons.toHtml [ Events.onClick (RouteChanged ReportRoute) ]
+                            , text "Reports"
+                            ]
                         ]
                 ]
     ]
@@ -626,7 +739,24 @@ renderReportRoute model =
             )
         ]
     , div [ class "footer" ]
-        [ Icons.calendar |> Icons.toHtml [ Events.onClick (RouteChanged HabitsRoute) ]
+        [ div [ Attributes.class "labelled-icon" ]
+            [ Icons.calendar |> Icons.toHtml [ Events.onClick (RouteChanged HabitsRoute) ]
+            , text "Home"
+            ]
+        ]
+    ]
+
+
+renderRegisterRoute : Model -> List (Html Msg)
+renderRegisterRoute model =
+    [ div []
+        [ h1 [] [ text "Sign up!" ]
+        , form [ Events.onSubmit (Register model.registerName model.email model.loginPassword) ]
+            [ input [ Attributes.placeholder "Name", Events.onInput ChangeRegisterName ] [ text model.registerName ]
+            , input [ Attributes.placeholder "Email Address", Events.onInput ChangeEmail ] [ text model.email ]
+            , input [ Attributes.placeholder "Password", Attributes.type_ "password", Events.onInput ChangePassword ] [ text model.loginPassword ]
+            , button [ Attributes.type_ "submit" ] [ text "Go!" ]
+            ]
         ]
     ]
 

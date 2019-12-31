@@ -156,14 +156,14 @@ button.active {
 .footer {
   display: flex;
   flex-direction: row;
-  align-items: center;
+  align-items: space-between;
   justify-content: center;
   bottom: 0;
-  padding: 25px 20px;
+  padding: 25px 0px;
 }
 
 .footer svg {
-  flex:1;
+  flex: 1;
 }
 
 .cancel {
@@ -200,7 +200,7 @@ button.active {
   letter-spacing: 10px;
   font-variant-caps: all-petite-caps;
   position: absolute;
-  top:2%;
+  top: 2%;
   text-align: center;
 }
 
@@ -208,4 +208,12 @@ button.active {
   display: flex;
   justify-content: space-between;
   font-size: 1.3em;
+}
+
+.labelled-icon {
+  flex: 1;
+  display: flex;
+  flex-flow: column;
+  align-items: center;
+  font-size: small;
 }
